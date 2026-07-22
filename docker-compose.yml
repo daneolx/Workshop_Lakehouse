@@ -1,0 +1,128 @@
+version: "3.8"
+
+# ============================================================
+# Stack mínimo Lakehouse On-Premise — Metricraft Workshop Hora 2
+# MinIO (storage) + Postgres (metadata) + Iceberg REST Catalog + Spark
+# ============================================================
+
+services:
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"   # API S3
+      - "9001:9001"   # Consola web
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password12345
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    # curl/wget ya no vienen en minio/minio (desde nov 2023). Usar mc ready.
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # Contenedor de un solo uso: crea el bucket "warehouse" y termina
+  mc:
+    image: minio/mc
+    container_name: mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 admin password12345 &&
+      mc mb -p local/warehouse &&
+      echo 'Bucket warehouse listo' &&
+      exit 0
+      "
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg
+      POSTGRES_DB: iceberg_catalog
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Nombre de servicio "rest": el spark-defaults.conf que trae la imagen
+  # tabulario/spark-iceberg ya apunta por defecto a un host llamado "rest".
+  rest:
+    image: tabulario/iceberg-rest
+    container_name: iceberg-rest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mc:
+        condition: service_completed_successfully
+    ports:
+      - "8181:8181"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password12345
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      # Backend real: Postgres (en vez del sqlite en memoria por defecto)
+      CATALOG_URI: jdbc:postgresql://postgres:5432/iceberg_catalog
+      CATALOG_JDBC_USER: iceberg
+      CATALOG_JDBC_PASSWORD: iceberg
+
+  # Motor de cómputo + Jupyter (alternativa visual a la terminal SSH)
+  # Acceso: http://<host>:8888  →  notebooks/demo_en_vivo.ipynb
+  # Sin token/password (solo workshop). Preferible: SSH local + spark-submit/spark-sql.
+  spark-iceberg:
+    image: tabulario/spark-iceberg
+    container_name: spark-iceberg
+    depends_on:
+      - rest
+      - minio
+    command: ["notebook"]
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password12345
+      AWS_REGION: us-east-1
+      # Java 17: Spark necesita abrir módulos (evita NoClassDefFoundError en StorageUtils)
+      JAVA_TOOL_OPTIONS: >-
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+        --add-opens=java.base/java.io=ALL-UNNAMED
+        --add-opens=java.base/java.net=ALL-UNNAMED
+        --add-opens=java.base/java.nio=ALL-UNNAMED
+        --add-opens=java.base/java.util=ALL-UNNAMED
+        --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+        --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+        --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
+        --add-opens=java.base/sun.security.action=ALL-UNNAMED
+        --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+        --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED
+    ports:
+      - "8888:8888"    # Jupyter Notebook + PySpark (alternativa)
+      - "8080:8080"    # Spark master UI
+      - "10000:10000"  # Thrift JDBC server (solo si conectamos Superset)
+      - "10001:10001"
+    volumes:
+      - ./warehouse:/home/iceberg/warehouse
+      - ./notebooks:/home/iceberg/notebooks/notebooks
+      - ./data:/home/iceberg/data
+      - ./jobs:/home/iceberg/jobs
+
+volumes:
+  minio-data:
+  pg-data:

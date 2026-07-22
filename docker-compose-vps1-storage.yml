@@ -1,0 +1,92 @@
+version: "3.8"
+
+# ============================================================
+# Stack Lakehouse On-Premise — Metricraft Workshop Hora 2
+# VPS 1: STORAGE + CATÁLOGO
+# MinIO (storage) + Postgres (metadata) + Iceberg REST Catalog
+# ============================================================
+#
+# IMPORTANTE: crear un archivo .env junto a este compose con:
+#   VPS1_PRIVATE_IP=10.x.x.x   (IP privada de este mismo VPS en la VPC de DigitalOcean)
+#
+# Firewall en este VPS: abrir 9000 (MinIO API) y 8181 (Iceberg REST)
+# SOLO hacia la IP privada del VPS2 (compute), no a internet.
+
+services:
+
+  minio:
+    image: minio/minio
+    container_name: minio
+    ports:
+      - "9000:9000"   # API S3 (usado por VPS2 y por 'rest' local)
+      - "9001:9001"   # Consola web (opcional exponer solo para admin)
+    environment:
+      MINIO_ROOT_USER: admin
+      MINIO_ROOT_PASSWORD: password12345
+    command: server /data --console-address ":9001"
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
+  # Contenedor de un solo uso: crea el bucket "warehouse" y termina
+  mc:
+    image: minio/mc
+    container_name: mc
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 admin password12345 &&
+      mc mb -p local/warehouse &&
+      echo 'Bucket warehouse listo' &&
+      exit 0
+      "
+
+  postgres:
+    image: postgres:16
+    container_name: postgres
+    environment:
+      POSTGRES_USER: iceberg
+      POSTGRES_PASSWORD: iceberg
+      POSTGRES_DB: iceberg_catalog
+    volumes:
+      - pg-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iceberg"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  # Nombre de servicio "rest": expuesto en el puerto 8181 hacia el VPS2
+  rest:
+    image: tabulario/iceberg-rest
+    container_name: iceberg-rest
+    depends_on:
+      postgres:
+        condition: service_healthy
+      mc:
+        condition: service_completed_successfully
+    ports:
+      - "8181:8181"
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password12345
+      AWS_REGION: us-east-1
+      CATALOG_WAREHOUSE: s3://warehouse/
+      CATALOG_IO__IMPL: org.apache.iceberg.aws.s3.S3FileIO
+      # OJO: aquí sigue siendo "minio" porque rest y minio están en el MISMO VPS/red
+      CATALOG_S3_ENDPOINT: http://minio:9000
+      CATALOG_S3_PATH__STYLE__ACCESS: "true"
+      CATALOG_URI: jdbc:postgresql://postgres:5432/iceberg_catalog
+      CATALOG_JDBC_USER: iceberg
+      CATALOG_JDBC_PASSWORD: iceberg
+
+volumes:
+  minio-data:
+  pg-data:

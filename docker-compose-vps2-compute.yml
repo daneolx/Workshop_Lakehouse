@@ -1,0 +1,60 @@
+version: "3.8"
+
+# ============================================================
+# Stack Lakehouse On-Premise — Metricraft Workshop Hora 2
+# VPS 2: CÓMPUTO
+# Spark + Iceberg + Jupyter (alternativa visual)
+# ============================================================
+#
+# IMPORTANTE: crear un archivo .env junto a este compose con:
+#   VPS1_PRIVATE_IP=10.x.x.x   (IP privada del VPS1 en la VPC de DigitalOcean)
+#
+# Este VPS necesita línea de vista de red hacia VPS1:8181 y VPS1:9000
+# (firewall del VPS1: permitir esos puertos solo desde la IP privada de este VPS2).
+#
+# Flujo habitual: SSH desde tu máquina local → docker exec / spark-submit / spark-sql
+# Alternativa visual: Jupyter en http://<IP-VPS2>:8888 (sin token — solo workshop)
+# Spark UI: http://<IP-VPS2>:8080
+
+services:
+
+  spark-iceberg:
+    image: tabulario/spark-iceberg
+    container_name: spark-iceberg
+    command: ["notebook"]
+    environment:
+      AWS_ACCESS_KEY_ID: admin
+      AWS_SECRET_ACCESS_KEY: password12345
+      AWS_REGION: us-east-1
+      # Endpoints remotos apuntando al VPS1 (storage/catálogo)
+      AWS_S3_ENDPOINT: http://${VPS1_PRIVATE_IP}:9000
+      ICEBERG_CATALOG_URI: http://${VPS1_PRIVATE_IP}:8181
+      # Java 17: Spark necesita abrir módulos (evita NoClassDefFoundError en StorageUtils)
+      JAVA_TOOL_OPTIONS: >-
+        --add-opens=java.base/java.lang=ALL-UNNAMED
+        --add-opens=java.base/java.lang.invoke=ALL-UNNAMED
+        --add-opens=java.base/java.lang.reflect=ALL-UNNAMED
+        --add-opens=java.base/java.io=ALL-UNNAMED
+        --add-opens=java.base/java.net=ALL-UNNAMED
+        --add-opens=java.base/java.nio=ALL-UNNAMED
+        --add-opens=java.base/java.util=ALL-UNNAMED
+        --add-opens=java.base/java.util.concurrent=ALL-UNNAMED
+        --add-opens=java.base/java.util.concurrent.atomic=ALL-UNNAMED
+        --add-opens=java.base/sun.nio.ch=ALL-UNNAMED
+        --add-opens=java.base/sun.nio.cs=ALL-UNNAMED
+        --add-opens=java.base/sun.security.action=ALL-UNNAMED
+        --add-opens=java.base/sun.util.calendar=ALL-UNNAMED
+        --add-opens=java.security.jgss/sun.security.krb5=ALL-UNNAMED
+    ports:
+      - "8888:8888"    # Jupyter Notebook + PySpark (alternativa a la terminal)
+      - "8080:8080"    # Spark master UI
+      - "10000:10000"  # Thrift JDBC (Superset opcional)
+      - "10001:10001"
+    volumes:
+      - ./warehouse:/home/iceberg/warehouse
+      # Donde Jupyter de tabulario/spark-iceberg lista los notebooks
+      - ./notebooks:/home/iceberg/notebooks/notebooks
+      - ./data:/home/iceberg/data
+      - ./jobs:/home/iceberg/jobs
+      # Sobrescribe la config default (hosts 'rest' / 'minio' de un solo host)
+      - ./spark-defaults.conf:/opt/spark/conf/spark-defaults.conf

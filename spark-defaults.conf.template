@@ -1,0 +1,22 @@
+# Plantilla — copiar a spark-defaults.conf y reemplazar VPS1_PRIVATE_IP
+# o usar: sed "s|VPS1_PRIVATE_IP|10.116.0.3|g" spark-defaults.conf.template > spark-defaults.conf
+
+spark.sql.extensions                                  org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions
+spark.sql.catalog.demo                                org.apache.iceberg.spark.SparkCatalog
+spark.sql.catalog.demo.catalog-impl                   org.apache.iceberg.rest.RESTCatalog
+spark.sql.catalog.demo.uri                             http://VPS1_PRIVATE_IP:8181
+spark.sql.catalog.demo.io-impl                         org.apache.iceberg.aws.s3.S3FileIO
+spark.sql.catalog.demo.warehouse                       s3://warehouse/
+spark.sql.catalog.demo.s3.endpoint                     http://VPS1_PRIVATE_IP:9000
+spark.sql.catalog.demo.s3.path-style-access            true
+spark.sql.defaultCatalog                               demo
+
+spark.hadoop.fs.s3a.endpoint                           http://VPS1_PRIVATE_IP:9000
+spark.hadoop.fs.s3a.access.key                         admin
+spark.hadoop.fs.s3a.secret.key                          password12345
+spark.hadoop.fs.s3a.path.style.access                  true
+spark.hadoop.fs.s3a.impl                               org.apache.hadoop.fs.s3a.S3AFileSystem
+
+spark.driver.memory                                    2g
+spark.executor.memory                                  2g
+spark.driver.maxResultSize                             512m
