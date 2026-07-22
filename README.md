@@ -1,5 +1,7 @@
 # Workshop Lakehouse
 
+**Autor:** Ing. David Cantorín — Data Architect
+
 ![Arquitectura MinIO + PostgreSQL + Iceberg REST Catalog + Apache Spark](docs/architecture.png)
 
 Stack **MinIO + PostgreSQL + Iceberg REST Catalog + Apache Spark**, basado en las imágenes oficiales de la comunidad Iceberg (`tabulario/iceberg-rest` y `tabulario/spark-iceberg`).
